@@ -417,6 +417,52 @@ def metropolis_step_delta(delta_cur, sd, a_delta, b_delta, w,
     else: # Reject proposa
         return delta_cur
 
+def metropolis_step_order(order_current:np.ndarray,
+                          alpha:float,
+                          delta:float,
+                          partition:np.ndarray,
+                          sim_mat:np.ndarray, k:int) -> np.ndarray:
+    """ Metropolis step for sampling the order
+
+    Args:
+        order_current (np.ndarray): Current order
+        alpha (float): alpha parameter
+        delta (float): delta parameter
+        partition (np.ndarray): current paratition
+        sim_mat (np.ndarray): similarity matrix
+        k (int): hyperparameter k, decides how many elements to permute
+
+    Returns:
+        np.ndarray: Sampled order
+    """    
+    
+    # calculate log partition prob of curent point
+    log_partition_prob_current = partition_log_pdf_fast(partition,
+                                                  sim_mat,
+                                                  order_current,
+                                                  alpha,
+                                                  delta) 
+    # Sample an order
+    order_samp = permute_k(order_current, k)
+    
+    # calculate log partition prob of proposed point
+    log_partition_prob_proposed = partition_log_pdf_fast(partition,
+                                                  sim_mat,
+                                                  order_samp,
+                                                  alpha,
+                                                  delta) 
+    
+    mh_ratio = np.exp(log_partition_prob_proposed - log_partition_prob_current)
+    
+    # Compare
+    a = min(1, mh_ratio)
+    
+    # Accept proposal
+    if np.random.uniform(0,1) < a:
+        return order_samp
+    else: # Reject proposa
+        return order_current
+
 def sample_phi(phi_cur:np.array, y:np.array, x:np.array, partition:np.array,
                phi_mean_prior:np.array,
                phi_cov_prior:np.array,
@@ -489,7 +535,7 @@ def calc_log_joint(partition:np.array, phi:np.array,
     """
     
     # Partition log prob
-    partition_log_prob = partition_log_pdf(partition,
+    partition_log_prob = partition_log_pdf_fast(partition,
                                         sim_mat, 
                                         order, 
                                         alpha, delta)
