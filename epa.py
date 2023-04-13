@@ -19,7 +19,7 @@ def logsumexp(x:np.array)->np.array:
     return c + np.log(np.sum(np.exp(x - c)))
 
 
-def exp_sim_func(x1:float, x2:float) -> float:
+def exp_sim_func(x1:float, x2:float, tau:float=1) -> float:
     """ Exponential similarity function
 
     Args:
@@ -29,7 +29,7 @@ def exp_sim_func(x1:float, x2:float) -> float:
     Returns:
         float: exponential similarity between x1 and x2
     """    
-    return np.exp(-np.linalg.norm(x1-x2)**2)
+    return np.exp(-tau*np.linalg.norm(x1-x2)**2)
 
 
 def partition_log_pdf(partition: np.array,
