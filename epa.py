@@ -39,7 +39,8 @@ def partition_log_pdf(partition: np.ndarray,
                       alpha: float,
                       delta: float) -> float:
 
-    """ Calculates the log probability of a partition given 
+    """ Calculates the log probability of a partition given (This implementation is pure python and slow, use 
+    partition_log_pdf_fast which is optimized with numba, this function is kept primarily for checking/testing)
 
     Args:
         partition (np.ndarray): Cluster indices of each point
@@ -60,7 +61,6 @@ def partition_log_pdf(partition: np.ndarray,
     
     q = 1 # No of clusters in t-1 (? one subset in empty set?)
     log_p = 0
-    tracker = []
     # Loop over each element (based on order) (think this is necessary)
     for t_1, o in enumerate(order):
 
@@ -89,11 +89,65 @@ def partition_log_pdf(partition: np.ndarray,
             clusters_dict[c_o] = [o]
 
         log_p += np.log(p_t)
-        tracker.append(np.log(p_t))
         
-    return log_p, tracker
+    return log_p
 
-@numba.njit 
+
+@numba.njit
+def partition_log_pdf_fast(partition: np.ndarray=np.array([]),
+                      sim_mat: np.ndarray=np.array([[]]),
+                      order: np.ndarray=np.array([]),
+                      alpha: float=1,
+                      delta: float=0) -> float:
+    """ Calculates the log probability of a partition given.
+
+    Args:
+        partition (np.ndarray): Cluster indices of each point
+        sim_mat (np.ndarray): n x n matrix of similarities
+        order (np.ndarray): n dim vector of order indicating the randomly sampled order
+        alpha (float): alpha parameter
+        delta (float): delta parameter
+
+    Returns:
+        float: log probability of partition
+    """    
+
+    assert len(order) == len(partition), "Length of order and partition inputs not the same"
+
+    q = 1 # No of clusters in t-1 (? one subset in empty set?)
+    log_p = 0
+
+    # Loop over each element (based on order) (think this is necessary)
+    for t_1, o in enumerate(order):
+
+        t = t_1 + 1 # to match t in formula
+
+        c_o = partition[o]
+
+        points_seen = order[0:t_1]
+        clust_labels_seen = partition[points_seen]
+
+        if c_o in clust_labels_seen:  # c_o belongs to existing cluster
+
+            # Extract members of cluster c_o is in 
+            cluster_member_position = np.where(clust_labels_seen==c_o)[0]
+            cluster_members = order[cluster_member_position]
+
+            # calculate p_t
+            point_pairwise_dist = sim_mat[o,:]
+            p_t = ((t-1 - delta * q)/(alpha + t-1)) * (np.sum(point_pairwise_dist[cluster_members]) / \
+                                                       np.sum(point_pairwise_dist[points_seen]))
+
+
+        else:  # c_o belongs to new cluster
+            # calculate p_t
+            p_t = (alpha + delta*q)/(alpha+t-1)
+
+
+        log_p += np.log(p_t)
+
+    return log_p
+
 def unit_log_likelihood_pdf(y:float,
                             x:np.array,
                             phi:np.array,
@@ -182,7 +236,7 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
     for c_name,cp in zip(clust_ids, candidate_partitions):
         
         # get loglikelihood of the partition
-        partition_comp =  partition_log_pdf(cp,
+        partition_comp =  partition_log_pdf_fast(cp,
                                         sim_mat, 
                                         order, 
                                         alpha, delta) 
@@ -223,7 +277,7 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
     return output_partition, phi,updated_names
 
 
-@numba.njit 
+
 def permute_k(current_ordering:np.array ,k:int) -> np.array:
     """ Permutes the first k elements of current_ordering, used to generate prosals for sigma (random ordering)
 
