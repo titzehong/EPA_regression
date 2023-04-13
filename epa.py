@@ -4,8 +4,9 @@ from scipy.stats import norm,multivariate_normal, gamma, beta
 import numpy as np
 from sklearn.metrics import pairwise_distances
 from typing import List, Tuple
+import numba 
 
-
+@numba.njit 
 def logsumexp(x:np.array)->np.array:
     """ Utility function for log - sum exp trick in normalization of log prob vector
 
@@ -18,7 +19,7 @@ def logsumexp(x:np.array)->np.array:
     c = x.max()
     return c + np.log(np.sum(np.exp(x - c)))
 
-
+@numba.njit 
 def exp_sim_func(x1:float, x2:float, tau:float=1) -> float:
     """ Exponential similarity function
 
@@ -32,18 +33,18 @@ def exp_sim_func(x1:float, x2:float, tau:float=1) -> float:
     return np.exp(-tau*np.linalg.norm(x1-x2)**2)
 
 
-def partition_log_pdf(partition: np.array,
-                      sim_mat: np.array,
-                      order: np.array,
+def partition_log_pdf(partition: np.ndarray,
+                      sim_mat: np.ndarray,
+                      order: np.ndarray,
                       alpha: float,
                       delta: float) -> float:
 
     """ Calculates the log probability of a partition given 
 
     Args:
-        partition (np.array): Cluster indices of each point
-        sim_mat (np.array): n x n matrix of similarities
-        order (np.array): n dim vector of order indicating the randomly sampled order
+        partition (np.ndarray): Cluster indices of each point
+        sim_mat (np.ndarray): n x n matrix of similarities
+        order (np.ndarray): n dim vector of order indicating the randomly sampled order
         alpha (float): alpha parameter
         delta (float): delta parameter
 
@@ -51,12 +52,15 @@ def partition_log_pdf(partition: np.array,
         float: log probability of partition
     """    
 
+    assert len(order) == len(partition), "Length of order and partition inputs not the same"
+
+
     # keeps track of clusters seen
     clusters_dict = {}
-
+    
     q = 1 # No of clusters in t-1 (? one subset in empty set?)
     log_p = 0
-    
+    tracker = []
     # Loop over each element (based on order) (think this is necessary)
     for t_1, o in enumerate(order):
 
@@ -68,9 +72,11 @@ def partition_log_pdf(partition: np.array,
 
             # Extract members of cluster c_o is in 
             cluster_members = clusters_dict[c_o]
-        
+            
+            total_seen = sum(list(clusters_dict.values()), [])
+            
             # calculate p_t
-            p_t = ((t-1 - delta * q)/(alpha + t-1)) * (np.sum(sim_mat[o,cluster_members]) / np.sum(sim_mat[o,:]))
+            p_t = ((t-1 - delta * q)/(alpha + t-1)) * (np.sum(sim_mat[o,cluster_members]) / np.sum(sim_mat[o,total_seen]))
 
             # Update seen clusters
             clusters_dict[c_o].append(o)
@@ -83,11 +89,11 @@ def partition_log_pdf(partition: np.array,
             clusters_dict[c_o] = [o]
 
         log_p += np.log(p_t)
-    
-    return log_p
+        tracker.append(np.log(p_t))
+        
+    return log_p, tracker
 
-
-    
+@numba.njit 
 def unit_log_likelihood_pdf(y:float,
                             x:np.array,
                             phi:np.array,
@@ -217,7 +223,7 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
     return output_partition, phi,updated_names
 
 
-
+@numba.njit 
 def permute_k(current_ordering:np.array ,k:int) -> np.array:
     """ Permutes the first k elements of current_ordering, used to generate prosals for sigma (random ordering)
 
