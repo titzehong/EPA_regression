@@ -391,10 +391,10 @@ def sample_phi(phi_cur:np.array, y:np.array, x:np.array, partition:np.array,
         xtx = x_vals.T @ x_vals
         xty = x_vals.T @ y_vals
 
-        phi_reg_post_cov_inv = xtx / sigma_sq_reg + np.linalg.inv(phi_cov_prior)
+        phi_reg_post_cov_inv = (1/sigma_sq_reg)*xtx  + np.linalg.inv(phi_cov_prior)
         phi_reg_post_cov = np.linalg.inv(phi_reg_post_cov_inv)
 
-        phi_reg_post_mean = phi_reg_post_cov @ ((xty / sigma_sq_reg)  +\
+        phi_reg_post_mean = phi_reg_post_cov @ (((1/sigma_sq_reg)*xty)  +\
                                                 np.linalg.inv(phi_cov_prior) @ phi_mean_prior)
 
         # Sample posterior
