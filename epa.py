@@ -368,8 +368,8 @@ def metropolis_step_alpha(alpha_cur, sd, a_alpha, b_alpha,
     log_prior_prop = gamma.logpdf(alpha_prop, a=a_alpha, scale=1/b_alpha)
     
     # Likelihood values
-    log_ll_cur = partition_log_pdf(partition, sim_mat, order, alpha_cur, delta)
-    log_ll_prop = partition_log_pdf(partition, sim_mat, order, alpha_prop, delta)
+    log_ll_cur = partition_log_pdf_fast(partition, sim_mat, order, alpha_cur, delta)
+    log_ll_prop = partition_log_pdf_fast(partition, sim_mat, order, alpha_prop, delta)
     
     # get ratio
     mh_ratio = np.exp(log_prior_prop + log_ll_prop) / np.exp(log_prior_cur + log_ll_cur)
@@ -402,8 +402,8 @@ def metropolis_step_delta(delta_cur, sd, a_delta, b_delta, w,
     prior_prop = delta_prior(delta_prop, a_delta=a_delta, b_delta=b_delta, w=w)
     
     # Likelihood values
-    ll_cur = np.exp(partition_log_pdf(partition, sim_mat, order, alpha, delta_cur))
-    ll_prop = np.exp(partition_log_pdf(partition, sim_mat, order, alpha, delta_prop))
+    ll_cur = np.exp(partition_log_pdf_fast(partition, sim_mat, order, alpha, delta_cur))
+    ll_prop = np.exp(partition_log_pdf_fast(partition, sim_mat, order, alpha, delta_prop))
     
     # get ratio
     mh_ratio = (prior_prop*ll_prop) / (prior_cur*ll_cur)
@@ -443,12 +443,12 @@ def metropolis_step_order(order_current:np.ndarray,
                                                   alpha,
                                                   delta) 
     # Sample an order
-    order_samp = permute_k(order_current, k)
+    order_sample = permute_k(order_current, k)
     
     # calculate log partition prob of proposed point
     log_partition_prob_proposed = partition_log_pdf_fast(partition,
                                                   sim_mat,
-                                                  order_samp,
+                                                  order_sample,
                                                   alpha,
                                                   delta) 
     
@@ -459,8 +459,8 @@ def metropolis_step_order(order_current:np.ndarray,
     
     # Accept proposal
     if np.random.uniform(0,1) < a:
-        return order_samp
-    else: # Reject proposa
+        return order_sample
+    else: # Reject proposal
         return order_current
 
 def sample_phi(phi_cur:np.array, y:np.array, x:np.array, partition:np.array,

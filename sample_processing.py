@@ -70,6 +70,6 @@ def agglo_cluster(sim_matrix: np.array,n_clust:int,
     model = AgglomerativeClustering(
         affinity='precomputed',
         n_clusters=n_clust,
-        linkage='average').fit(1-sim_matrix)
+        linkage=linkage_type).fit(1-sim_matrix)
     
     return model.labels_
