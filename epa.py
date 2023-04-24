@@ -5,6 +5,7 @@ import numpy as np
 from sklearn.metrics import pairwise_distances
 from typing import List, Tuple
 import numba 
+import pandas as pd
 
 @numba.njit 
 def logsumexp(x:np.array)->np.array:
@@ -208,7 +209,7 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
                                    phi:np.array, y:np.array,
                                     x:np.array, sigma_reg:float,
                                   names_used:List[int], phi_base_mean:float,
-                                   phi_base_cov:np.array) -> Tuple[np.array, np.array, List[int]]:    
+                                   phi_base_cov:np.array,reordering:bool=True) -> Tuple[np.array, np.array, List[int]]:    
     """
     partition: np.array (1xn) dim array of cluster indices for each data points
     i: which data point to generate candidates for
@@ -272,10 +273,38 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
     if cand_part_choice == 0:  # if new partition formed then update an extra name and phi
         updated_names.append(new_clust_id)
         phi = np.concatenate([phi,np.array([phi_new])])
- 
-        
-    return output_partition, phi,updated_names
+    
+    
+    if reordering == True:
+    # Re-indexing step
+        # re-index partition
+        new_labels, existing_labels, relab_map = gen_reindex(output_partition)
+        recoded_partition = remap_partition(output_partition, relab_map)
 
+        # reset phi
+        # Drop all empty elements
+        phi_new = phi[existing_labels-1]
+        #print(existing_labels-1)
+
+        return recoded_partition, phi_new, list(np.sort(new_labels))
+    
+    else:
+        return output_partition, phi,updated_names 
+
+def remap_partition(partition, relab_dict):
+    # from https://stackoverflow.com/questions/16992713/translate-every-element-in-numpy-array-according-to-key
+    # Basically maps partition to a new set of indexes based on relab_dict.
+    u,inv = np.unique(partition,return_inverse = True)
+    recoded_partition = np.array([relab_dict[x] for x in u])[inv].reshape(partition.shape)
+    return recoded_partition
+
+def gen_reindex(partition):
+    unique_labels = pd.Series(partition).value_counts()
+    unique_labels = np.array(unique_labels.index)
+    #unique_labels = np.unique(partition)
+
+    new_labels = np.arange(len(unique_labels)) + 1
+    return new_labels, unique_labels, dict(zip(unique_labels, new_labels))
 
 
 def permute_k(current_ordering:np.array ,k:int) -> np.array:
@@ -371,8 +400,10 @@ def metropolis_step_alpha(alpha_cur, sd, a_alpha, b_alpha,
     log_ll_cur = partition_log_pdf_fast(partition, sim_mat, order, alpha_cur, delta)
     log_ll_prop = partition_log_pdf_fast(partition, sim_mat, order, alpha_prop, delta)
     
+    log_num = log_prior_prop + log_ll_prop
+    log_denom = log_prior_cur + log_ll_cur
     # get ratio
-    mh_ratio = np.exp(log_prior_prop + log_ll_prop) / np.exp(log_prior_cur + log_ll_cur)
+    mh_ratio = np.exp(log_num - log_denom)
     
     a = min(1, mh_ratio)
     #print(a)
