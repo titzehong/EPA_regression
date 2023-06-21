@@ -123,11 +123,16 @@ def partition_log_pdf_fast(partition: np.ndarray=np.array([]),
 
         t = t_1 + 1 # to match t in formula
 
-        c_o = partition[o]
+        c_o = partition[o]  # cluster membership of current point
+        
+        if t_1 == 0:
+            points_seen = order[0:t_1]
+        else:
+            points_seen = order[0:t_1-1]
 
-        points_seen = order[0:t_1]
         clust_labels_seen = partition[points_seen]
-
+        q = len(np.unique(clust_labels_seen))
+        
         if c_o in clust_labels_seen:  # c_o belongs to existing cluster
 
             # Extract members of cluster c_o is in 
@@ -186,14 +191,20 @@ def generate_candidate_partitions_alt(i:int,
 
     Returns:
         Tuple(List[np.array], List[int], int): candidate_partitions: list of arrays where each array corresponds to candidate partition
-                                               clust_ids: 
+                                               clust_ids: the unique cluster labels from the input partition
+                                               new_clust_id: the unique cluster labels from the output partition
     """
     
     clust_ids = list(np.unique(partition))
+
+    # generate label for new cluster as +1 of the largest current label
     new_clust_id = max(names_used) + 1
 
+    # insert at 0 element, the new cluster id name
     clust_ids.insert(0,new_clust_id)
     candidate_partitions = []
+
+    # Loop over each unique index and generate a partition where the i-th entry's cluster id is replaced 
     for c in clust_ids:
         cand_part = partition.copy()
         cand_part[i] = c
@@ -221,6 +232,7 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
     y: y_data
     x: x_data
     names_used: str of cluster ids used thus far
+    reordering: whether to re-order cluster labels to prevent cluster labels from getting large
     """
     
     y_i = y[i]
@@ -252,6 +264,7 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
                                     sigma_reg=sigma_reg)
 
         else: # it is an existiing cluster
+            #print("phi used: ", phi[c_name-1])
             ll_comp = unit_log_likelihood_pdf(y_i,
                                 x_i, phi[c_name-1],  # 1 based indexing for cluster but 0 for phi
                                 model='Gaussian',
@@ -259,6 +272,11 @@ def sample_conditional_i_clust_alt(i:int , partition:np.array,
         
         # calculate probability of candidate partition and collect
         log_prob_cp = partition_comp + ll_comp
+        #print(f"Correct LP {c_name}: {log_prob_cp}")
+        #print(f'Correct Partition comp {c_name}: , {partition_comp}')
+
+        #print("Partition: ", cp)
+        #print(' ')
         log_liks.append(log_prob_cp)
 
 
@@ -299,10 +317,12 @@ def remap_partition(partition, relab_dict):
     return recoded_partition
 
 def gen_reindex(partition):
+    # Get the unique labels of the current partition
     unique_labels = pd.Series(partition).value_counts()
     unique_labels = np.array(unique_labels.index)
     #unique_labels = np.unique(partition)
 
+    # Generate new labels from 1 - max label
     new_labels = np.arange(len(unique_labels)) + 1
     return new_labels, unique_labels, dict(zip(unique_labels, new_labels))
 
@@ -582,3 +602,266 @@ def calc_log_joint(partition:np.array, phi:np.array,
     return partition_log_prob + sampling_log_prob
 
    
+
+# Gibbs optimization code
+@numba.njit()
+def partition_log_pdf_factors(start_id:int,
+                              return_fac: bool=False,
+                              partition: np.ndarray=np.array([]),
+                      sim_mat: np.ndarray=np.array([[]]),
+                      order: np.ndarray=np.array([]),
+                      alpha: float=1,
+                      delta: float=0) -> float:
+    """ Calculates the log probability of with some factors pre-computed. Computes factors in the partition 
+    from start_id onwards
+
+    Args:
+        start_id (int): Index from with to start computing the partial pdf, note this corresponds to 
+        delta_{start_id}
+        partition (np.ndarray): Cluster indices of each point
+        sim_mat (np.ndarray): n x n matrix of similarities
+        order (np.ndarray): n dim vector of order indicating the randomly sampled order
+        alpha (float): alpha parameter
+        delta (float): delta parameter
+
+    Returns:
+        float: log probability of partition
+    """    
+
+    assert len(order) == len(partition), "Length of order and partition inputs not the same"
+
+    q = 1 # No of clusters in t-1 (? one subset in empty set?)
+    
+    
+    log_p = np.zeros(len(partition))
+
+    # Loop over each element (based on order) (think this is necessary)
+    for t_1, o in enumerate(order):
+        
+        t = t_1 + 1 # to match t in formula
+
+        c_o = partition[o]
+
+        if t_1 == 0:
+            points_seen = order[0:t_1]
+        else:
+            points_seen = order[0:t_1-1]
+            
+        clust_labels_seen = partition[points_seen]
+        q = len(np.unique(clust_labels_seen))
+
+        if c_o in clust_labels_seen:  # c_o belongs to existing cluster
+
+            # Extract members of cluster c_o is in 
+            cluster_member_position = np.where(clust_labels_seen==c_o)[0]
+            cluster_members = order[cluster_member_position]
+
+            # calculate p_t
+            point_pairwise_dist = sim_mat[o,:]
+            p_t = ((t-1 - delta * q)/(alpha + t-1)) * (np.sum(point_pairwise_dist[cluster_members]) / \
+                                                       np.sum(point_pairwise_dist[points_seen]))
+
+
+        else:  # c_o belongs to new cluster
+            # calculate p_t
+            p_t = (alpha + delta*q)/(alpha+t-1)
+
+        log_p[t_1] = np.log(p_t)
+
+    
+    return log_p
+
+
+@numba.njit()
+def partition_log_pdf_partial(start_id:int,
+                              return_fac: bool=False,
+                              partition: np.ndarray=np.array([]),
+                      sim_mat: np.ndarray=np.array([[]]),
+                      order: np.ndarray=np.array([]),
+                      alpha: float=1,
+                      delta: float=0 ) -> float:
+    """ Calculates the log probability of with some factors pre-computed. Computes factors in the partition 
+    from start_id onwards
+
+    Args:
+        start_id (int): Index from with to start computing the partial pdf, note this corresponds to 
+        delta_{start_id}
+        partition (np.ndarray): Cluster indices of each point
+        sim_mat (np.ndarray): n x n matrix of similarities
+        order (np.ndarray): n dim vector of order indicating the randomly sampled order
+        alpha (float): alpha parameter
+        delta (float): delta parameter
+
+    Returns:
+        float: log probability of partition
+    """    
+
+    assert len(order) == len(partition), "Length of order and partition inputs not the same"
+
+    q = 1 # No of clusters in t-1 (? one subset in empty set?)
+    
+    log_p = 0
+
+    # Loop over each element (based on order) (think this is necessary)
+    for t_1, o in enumerate(order[start_id:]):
+    
+        
+        t = t_1 + 1 + start_id # to match t in formula
+
+        c_o = partition[o]
+
+        if t == 1:
+            points_seen = order[0:t-1]
+        else:
+            points_seen = order[0:t-2]
+            
+        clust_labels_seen = partition[points_seen]
+        q = len(np.unique(clust_labels_seen))
+
+        if c_o in clust_labels_seen:  # c_o belongs to existing cluster
+
+            # Extract members of cluster c_o is in 
+            cluster_member_position = np.where(clust_labels_seen==c_o)[0]
+            cluster_members = order[cluster_member_position]
+
+            # calculate p_t
+            point_pairwise_dist = sim_mat[o,:]
+            p_t = ((t-1 - delta * q)/(alpha + t-1)) * (np.sum(point_pairwise_dist[cluster_members]) / \
+                                                       np.sum(point_pairwise_dist[points_seen]))
+
+        else:  # c_o belongs to new cluster
+            # calculate p_t
+            p_t = (alpha + delta*q)/(alpha+t-1)
+
+        log_p += np.log(p_t)
+
+    
+    return log_p
+
+
+
+def sample_conditional_i_clust_gibbs_opti(i:int,
+                                          order_place:int,
+                                   partition:np.array,
+                                  return_fac:bool,
+                                 pre_compute_factors:np.array,
+                                 alpha:float, delta:float,
+                                  sim_mat:np.array, order:np.array,
+                                   phi:np.array, y:np.array,
+                                    x:np.array, sigma_reg:float,
+                                  names_used:List[int], phi_base_mean:float,
+                                   phi_base_cov:np.array,reordering:bool=True) -> Tuple[np.array, np.array, List[int]]:    
+    """
+    partition: np.array (1xn) dim array of cluster indices for each data points
+    i: which data point to generate candidates for
+    order_place: where in the order the data point is.
+    pre_compute_factors: np.array (1xn) dim array of factors calculated in the last term.
+    sim_mat: n x n matrix of similarities 
+    phis: matrix / vector each column is beta_j
+    order: array of 0:(n-1) of any order indicating the (randomly sampled order)
+    alpha: alpha parameter of distribution
+    delta: delta parameter of distribution
+    y: y_data
+    x: x_data
+    names_used: str of cluster ids used thus far
+    reordering: whether to re-order cluster labels to prevent cluster labels from getting large
+    """
+    
+    y_i = y[i]
+    x_i = x[i]
+
+    # generate candidate partitions
+    candidate_partitions, clust_ids, new_clust_id = generate_candidate_partitions_alt(i,
+                                                                                      partition,
+                                                                                      names_used)
+    updated_names = names_used.copy()
+    # calc log likelihood of each partition
+    log_liks = []
+    
+    
+    for c_name,cp in zip(clust_ids, candidate_partitions):
+        
+        if not return_fac:
+        # get loglikelihood of the partition
+            partition_comp_partial =  partition_log_pdf_partial(order_place,  # start_id
+                                                        return_fac,
+                                                        cp,
+                                                        sim_mat, 
+                                                        order, 
+                                                        alpha, delta) 
+        
+        else:
+            partition_comp_partial =  partition_log_pdf_factors(order_place,  # start_id
+                                                        return_fac,
+                                                        cp,
+                                                        sim_mat, 
+                                                        order, 
+                                                        alpha, delta) 
+
+        if not return_fac:
+            partition_comp = partition_comp_partial + np.sum(pre_compute_factors[:order_place])
+            
+        else:
+            partition_comp = np.sum(partition_comp_partial)
+            #print('Partition comp: ', partition_comp)
+        if c_name == new_clust_id: # if it is the new cluster (Note this is always first)
+
+            phi_new = np.random.multivariate_normal(phi_base_mean,phi_base_cov) # sample something from prior
+
+            ll_comp = unit_log_likelihood_pdf(y_i,
+                                    x_i, phi_new,
+                                    model='Gaussian',
+                                    sigma_reg=sigma_reg)
+
+        else: # it is an existiing cluster
+            #print("phi used: ", phi[c_name-1])
+            ll_comp = unit_log_likelihood_pdf(y_i,
+                                x_i, phi[c_name-1],  # 1 based indexing for cluster but 0 for phi
+                                model='Gaussian',
+                                sigma_reg=sigma_reg)
+        
+        # calculate probability of candidate partition and collect
+        log_prob_cp = partition_comp + ll_comp
+        #print(f"New LP {c_name}: {log_prob_cp}")
+        #print(f'New Partition comp {c_name}: , {partition_comp}')
+
+        #print("Partition: ", cp)
+        #print(' ')
+        log_liks.append(log_prob_cp)
+
+
+    # Collect probabilities and normalize with log-sum-exp trick
+    log_liks = np.array(log_liks)
+    cand_probs = np.exp(log_liks - logsumexp(log_liks))
+
+    # sample outcome partition for candidate partitions
+    cand_part_choice = np.random.choice(np.arange(len(cand_probs)), p=cand_probs)
+    output_partition = candidate_partitions[cand_part_choice]
+
+    if cand_part_choice == 0:  # if new partition formed then update an extra name and phi
+        updated_names.append(new_clust_id)
+        phi = np.concatenate([phi,np.array([phi_new])])
+    
+    
+    if reordering == True:
+    # Re-indexing step
+        # re-index partition
+        new_labels, existing_labels, relab_map = gen_reindex(output_partition)
+        recoded_partition = remap_partition(output_partition, relab_map)
+
+        # reset phi
+        # Drop all empty elements
+        phi_new = phi[existing_labels-1]
+        #print(existing_labels-1)
+        
+        if return_fac:
+            return recoded_partition, phi_new, list(np.sort(new_labels)), partition_comp_partial
+        else:
+            return recoded_partition, phi_new, list(np.sort(new_labels))
+    
+    else:
+        
+        if return_fac: 
+            return output_partition, phi, updated_names, partition_comp_partial
+        else:
+            return output_partition, phi,updated_names
